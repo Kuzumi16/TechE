@@ -1,0 +1,174 @@
+this.abilities.add(new ForceFieldAbility(120f, 12f, 10000f, 60f * 8, 6, 0.8f){
+                final float range = 120f; // 修复范围
+                final float rotation = 0f;
+                float hexagonPulse = 0f; // 六边形脉冲动画
+                float shieldHitTime = 0f; // 护盾被击时间
+                final float shieldHitDuration = 10f; // 闪动持续时间
+                float lastHitTime = 0f; // 上次触发时间
+                final float hitCooldown = 0.1f; // 0.1秒冷却时间
+
+                // 子弹阻挡特效
+                final Effect bulletBlockEffect = new Effect(15f, e -> {
+                    Draw.color(Pal.heal, Color.white, e.fout());
+                    Lines.stroke(2f * e.fout());
+
+                    // 绘制收缩的六边形
+                    for(int i = 0; i < 6; i++) {
+                        float angle1 = e.rotation + i * 60f;
+                        float angle2 = e.rotation + (i + 1) * 60f;
+                        float size = 10f * e.fout(); // 从大到小收缩
+                        float x1 = e.x + Angles.trnsx(angle1, size);
+                        float y1 = e.y + Angles.trnsy(angle1, size);
+                        float x2 = e.x + Angles.trnsx(angle2, size);
+                        float y2 = e.y + Angles.trnsy(angle2, size);
+                        Lines.line(x1, y1, x2, y2);
+                    }
+
+                    // 中心爆炸效果
+                    Draw.alpha(e.fout() * 0.6f);
+                    Fill.circle(e.x, e.y, 6f * e.fin());
+                    Draw.reset();
+                });
+
+                @Override
+                public void update(Unit unit){
+                    hexagonPulse = (hexagonPulse + Time.delta * 0.03f) % 1f;
+
+                    // 递减护盾被击时间
+                    if(shieldHitTime > 0) {
+                        shieldHitTime -= Time.delta;
+                    }
+
+                    // 更新冷却时间
+                    if(lastHitTime > 0) {
+                        lastHitTime -= Time.delta;
+                    }
+
+                    // 检测子弹碰撞（只有在冷却结束后才检测）
+                    if(lastHitTime <= 0) {
+                        boolean hitDetected = false;
+
+                        // 使用临时列表避免并发修改
+                        final Bullet[] firstBullet = {null};
+                        final float[] minDistance = {Float.MAX_VALUE};
+
+                        // 找到最近的一个子弹
+                        Groups.bullet.each(bullet -> {
+                            if(bullet.team != unit.team && unit.dst(bullet) <= range * 1.1f) {
+                                float distance = unit.dst(bullet);
+                                if(distance < minDistance[0]) {
+                                    firstBullet[0] = bullet;
+                                    minDistance[0] = distance;
+                                }
+                            }
+                        });
+
+                        // 只处理最近的一个子弹
+                        if(firstBullet[0] != null) {
+                            // 触发护盾被击效果
+                            shieldHitTime = shieldHitDuration;
+
+                            // 创建子弹阻挡特效
+                            bulletBlockEffect.at(firstBullet[0].x, firstBullet[0].y, Mathf.random(360f));
+
+                            // 播放音效（音量根据距离调整）
+                            float volume = Mathf.clamp(1f - (minDistance[0] / (range * 1.1f)), 0.3f, 1f);
+                            Sounds.shield.at(firstBullet[0].x, firstBullet[0].y, volume * 0.7f);
+
+                            // 移除子弹
+
+                            // 设置冷却时间
+                            lastHitTime = hitCooldown;
+                            hitDetected = true;
+                        }
+
+                        // 如果没有检测到子弹，但护盾还在闪动，继续冷却
+                        if(!hitDetected && shieldHitTime > 0) {
+                            lastHitTime = hitCooldown;
+                        }
+                    }
+
+                    // ... 原有的治疗逻辑 ...
+                }
+
+                @Override
+                public void draw(Unit unit){
+                    Draw.z(Layer.effect);
+
+                    // 计算闪动强度
+                    float hitIntensity = shieldHitTime > 0 ? (shieldHitTime / shieldHitDuration) : 0f;
+
+                    // 计算六边形参数
+                    float hexagonSize = range;
+                    int sides = 6;
+                    float pulseFactor = 1f + hexagonPulse * 0.2f + hitIntensity * 0.3f;
+
+                    // 绘制主六边形激光轮廓
+                    Draw.color(Pal.heal, Color.white, 0.8f + hitIntensity * 0.4f);
+                    Lines.stroke((3f + hitIntensity * 2f) * pulseFactor);
+
+                    for(int i = 0; i < sides; i++){
+                        float angle1 = rotation + i * 360f / sides;
+                        float angle2 = rotation + (i + 1) * 360f / sides;
+
+                        float x1 = unit.x + Angles.trnsx(angle1, hexagonSize);
+                        float y1 = unit.y + Angles.trnsy(angle1, hexagonSize);
+                        float x2 = unit.x + Angles.trnsx(angle2, hexagonSize);
+                        float y2 = unit.y + Angles.trnsy(angle2, hexagonSize);
+
+                        Lines.line(x1, y1, x2, y2);
+                    }
+
+                    // 绘制六边形顶点光点
+                    for(int i = 0; i < sides; i++){
+                        float angle = rotation + i * 360f / sides;
+                        float pointX = unit.x + Angles.trnsx(angle, hexagonSize);
+                        float pointY = unit.y + Angles.trnsy(angle, hexagonSize);
+
+                        Draw.color(Pal.heal, Color.white, 0.9f + hitIntensity * 0.3f);
+                        Fill.circle(pointX, pointY, (3f + hitIntensity * 1.5f) * pulseFactor);
+
+                        // 顶点激光效果
+                        Draw.color(Pal.heal, Color.white, 0.4f + hitIntensity * 0.3f);
+                        Lines.stroke(1f + hitIntensity * 0.5f);
+                        Lines.line(unit.x, unit.y, pointX, pointY);
+                    }
+
+                    // 添加能量流动效果
+                    Draw.color(Pal.heal, Color.white, 0.3f + hitIntensity * 0.2f);
+                    float flowSpeed = hitIntensity > 0 ? 0.05f : 0.03f;
+                    for(int i = 0; i < sides; i++){
+                        float progress = (hexagonPulse * (1f + hitIntensity) + i * 0.166f) % 1f;
+                        float currentAngle = rotation + i * 360f / sides;
+                        float nextAngle = rotation + ((i + 1) % sides) * 360f / sides;
+
+                        float moveAngle = currentAngle + (nextAngle - currentAngle) * progress;
+                        float moveDist = hexagonSize * 0.9f;
+
+                        float energyX = unit.x + Angles.trnsx(moveAngle, moveDist);
+                        float energyY = unit.y + Angles.trnsy(moveAngle, moveDist);
+
+                        Fill.circle(energyX, energyY, 2f + hitIntensity * 1f);
+                    }
+
+                    // 被击时添加额外的冲击波效果
+                    if(hitIntensity > 0) {
+                        Draw.color(Pal.heal, Color.white, hitIntensity * 0.6f);
+                        Lines.stroke(hitIntensity * 2f);
+                        Lines.circle(unit.x, unit.y, range * (0.8f + hitIntensity * 0.4f));
+
+                        // 添加随机粒子（也受冷却限制）
+                        if(Mathf.chance(hitIntensity * 0.2f)) {
+                            float angle = Mathf.random(360f);
+                            float dist = Mathf.random(range);
+                            float px = unit.x + Angles.trnsx(angle, dist);
+                            float py = unit.y + Angles.trnsy(angle, dist);
+
+                            Draw.color(Pal.heal, Color.white, hitIntensity);
+                            Fill.circle(px, py, hitIntensity * 3f);
+                        }
+                    }
+
+                    Draw.reset();
+                }
+            });
